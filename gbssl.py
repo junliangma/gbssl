@@ -65,7 +65,7 @@ class Base():
 
         Parameters
         ----------
-        X : array_like, shape = [n_samples]
+        x : array_like, shape = [n_samples]
             Node IDs
 
         Returns
@@ -130,3 +130,42 @@ class LGC(Base):
         B = np.zeros((n_samples,n_classes))
         B[self.x_,self.y_] = 1
         return (1-self.alpha)*B
+
+class HMN(Base):
+    """Harmonic funcsion (HMN) for GBSSL
+
+    Parameters
+    ----------
+    max_iter : float
+      maximum number of iterations allowed
+
+    Attributes
+    ----------
+    x_ : array, shape = [n_samples]
+        Input array of node IDs.
+
+    Examples
+    --------
+    <<<
+
+    References
+    ----------
+    Zhu, X., Ghahramani, Z., & Lafferty, J. (2003, August).
+    Semi-supervised learning using gaussian fields and harmonic functions.
+    In ICML (Vol. 3, pp. 912-919).
+    """
+
+    def _build_propagation_matrix(self):
+        D = sparse.diags((1.0/(self.graph.sum(1))).T.tolist()[0],offsets=0)
+        P = D.dot(self.graph)
+        n_samples = self.graph.shape[0]
+        labeled = np.arange(n_samples)[self.x_]
+        P[labeled] = 0
+        return P
+
+    def _build_base_matrix(self):
+        n_samples = self.graph.shape[0]
+        n_classes = self.y_.max()+1
+        B = np.zeros((n_samples,n_classes))
+        B[self.x_,self.y_] = 1
+        return B
