@@ -13,11 +13,9 @@ from abc import ABCMeta, abstractmethod
 
 class Base():
     __metaclass__ = ABCMeta
-    def __init__(self,graph,alpha=0.99,lamb=0.001,max_iter=30):
+    def __init__(self,graph,max_iter=30):
         self.max_iter = max_iter
         self.graph = graph
-        self.alpha = alpha
-        self.lamb = lamb
 
     @abstractmethod
     def _build_propagation_matrix(self):
@@ -87,7 +85,7 @@ class Base():
 
         Returns
         -------
-        probabilities : array_like, shape = [n_samples]
+        probabilities : array_like, shape = [n_samples, n_classes]
             Probability distributions across class labels
         """
         return (self.F_[x].T / np.sum(self.F_[x], axis=1)).T
@@ -118,6 +116,10 @@ class LGC(Base):
     Learning with local and global consistency.
     Advances in neural information processing systems, 16(16), 321-328.
     """
+
+    def __init__(self,graph,alpha=0.99,max_iter=30):
+        super(LGC, self).__init__(graph,max_iter=30)
+        self.alpha=alpha
 
     def _build_propagation_matrix(self):
         """ LGC computes the normalized Laplacian as its propagation matrix"""
@@ -196,6 +198,9 @@ class PARW(Base):
     Learning with partially absorbing random walks.
     In Advances in Neural Information Processing Systems (pp. 3077-3085).
     """
+    def __init__(self,graph,lamb=1.0,max_iter=30):
+        super(PARW, self).__init__(graph,max_iter=30)
+        self.lamb=lamb
 
     def _build_propagation_matrix(self):
         d = np.array(self.graph.sum(1).T)[0]
