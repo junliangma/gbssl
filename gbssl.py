@@ -25,6 +25,15 @@ class Base():
     def _build_base_matrix(self):
         raise NotImplementedError("Base matrix construction must be implemented to fit a model.")
 
+    def _init_label_matrix(self):
+        n_samples = self.graph.shape[0]
+        n_classes = self.y_.max()+1
+        return np.zeros((n_samples,n_classes))
+
+    def _arrange_params(self):
+        """Do nothing by default"""
+        pass
+
     def fit(self,x,y):
         """Fit a graph-based semi-supervised learning model
 
@@ -45,9 +54,9 @@ class Base():
         self.x_ = x
         self.y_ = y
 
-        n_samples = self.graph.shape[0]
-        n_classes = self.y_.max()+1
-        self.F_ = np.zeros((n_samples,n_classes))
+        self._arrange_params()
+
+        self.F_ = self._init_label_matrix()
 
         P = self._build_propagation_matrix()
         B = self._build_base_matrix()
@@ -217,3 +226,97 @@ class PARW(Base):
         Z = sparse.diags(1.0 / (d+self.lamb))
         Lamb = sparse.diags(self.lamb,shape=(n_samples,n_samples))
         return Z.dot(Lamb).dot(B)
+
+class MAD(Base):
+    """Modified Adsorption (MAD) for GBSSL
+
+    Parameters
+    ----------
+    mu : array, shape = [3] > 0 (default = [1.0, 0.5, 1.0])
+      Define importance among inj, cont, and abnd
+    beta : float
+      Used to determine p_inj_, p_cont_ and p_abnd_
+    max_iter : float
+      maximum number of iterations allowed
+
+    Attributes
+    ----------
+    x_ : array, shape = [n_samples]
+        Input array of node IDs.
+    p_inj_ : array, shape = [n_samples]
+      Probability to inject
+    p_cont_ : array, shape = [n_samples]
+      Probability to continue random walk
+    p_abnd_ : array, shape = [n_samples]
+        defined as 1 - p_inj - p_cont
+
+    Examples
+    --------
+    <<<
+
+    References
+    ----------
+    Talukdar, P. P., & Crammer, K. (2009).
+    New regularized algorithms for transductive learning.
+    In Machine Learning and Knowledge Discovery in Databases (pp. 442-457). Springer Berlin Heidelberg.
+    """
+    def __init__(self,graph,mu=np.array([1.0,0.5,1.0]),beta=2.0,max_iter=30):
+        super(MAD, self).__init__(graph,max_iter=30)
+        self.mu = mu
+        self.beta = beta
+
+    def _init_label_matrix(self):
+        n_samples = self.graph.shape[0]
+        n_classes = self.y_.max()+1
+        return np.zeros((n_samples,n_classes+1)) # including dummy label
+
+    def _build_normalization_term(self):
+        W = self.graph.T.multiply(sparse.csr_matrix(self.p_cont_)).T
+        d = np.array(W.sum(1).T)[0]
+        dT = np.array(W.sum(0))[0]
+        return sparse.diags(1.0/(self.mu[0]*self.p_inj_ + self.mu[1]*(d+dT) + self.mu[2]))
+
+    def _build_propagation_matrix(self):
+        Z = self._build_normalization_term()
+        W = self.graph.T.multiply(sparse.csr_matrix(self.p_cont_)).T
+        WT = W.T
+        return Z.dot(self.mu[1]*(W+WT))
+
+    def _build_base_matrix(self):
+        n_samples = self.graph.shape[0]
+        n_classes = self.y_.max()+1
+        B = np.zeros((n_samples,n_classes+1)) # including dummy label
+        B[self.x_,self.y_] = 1
+        Z = self._build_normalization_term()
+        S = sparse.diags(self.p_inj_)
+        R = np.zeros((n_samples,n_classes+1))
+        R[:,-1] = self.p_abnd_
+        return Z.dot(self.mu[0]*S.dot(B)+self.mu[2]*R)
+
+    def _arrange_params(self):
+        P = sparse.csr_matrix(self.graph / np.maximum(self.graph.sum(1),1))
+        logP = P.copy()
+        logP.data = np.log(logP.data)
+        H = - np.array(P.multiply(logP).sum(1).T)[0]
+        c = np.log(self.beta) / np.log(self.beta+np.exp(H))
+        d = np.zeros(self.graph.shape[0])
+        d[self.x_] = (1-c[self.x_]) * np.sqrt(H[self.x_])
+        z = np.maximum(c+d,1)
+        self.p_inj_ = d / z
+        self.p_cont_ = c / z
+        self.p_abnd_ = 1 - self.p_inj_ - self.p_cont_
+
+    def predict_proba(self,x):
+        """Predict probability for each possible label
+
+        Parameters
+        ----------
+        x : array_like, shape = [n_samples]
+            Node IDs
+
+        Returns
+        -------
+        probabilities : array_like, shape = [n_samples, n_classes]
+            Probability distributions across class labels
+        """
+        return (self.F_[x,:-1].T / np.sum(self.F_[x,:-1], axis=1)).T
