@@ -170,9 +170,7 @@ class HMN(Base):
     def _build_propagation_matrix(self):
         D = sparse.diags((1.0/(self.graph.sum(1))).T.tolist()[0],offsets=0)
         P = D.dot(self.graph)
-        n_samples = self.graph.shape[0]
-        labeled = np.arange(n_samples)[self.x_]
-        P[labeled] = 0
+        P[self.x_] = 0
         return P
 
     def _build_base_matrix(self):
@@ -320,3 +318,57 @@ class MAD(Base):
             Probability distributions across class labels
         """
         return (self.F_[x,:-1].T / np.sum(self.F_[x,:-1], axis=1)).T
+
+class OMNIProp(Base):
+    """OMNI-Prop for GBSSL
+
+    Parameters
+    ----------
+    lamb : float > 0 (default = 1.0)
+      Define importance between prior and evidence from neighbors
+    max_iter : float
+      maximum number of iterations allowed
+
+    Attributes
+    ----------
+    x_ : array, shape = [n_samples]
+        Input array of node IDs.
+
+    Examples
+    --------
+    <<<
+
+    References
+    ----------
+    Yamaguchi, Y., Faloutsos, C., & Kitagawa, H. (2015, February).
+    OMNI-Prop: Seamless Node Classification on Arbitrary Label Correlation.
+    In Twenty-Ninth AAAI Conference on Artificial Intelligence.
+    """
+
+    def __init__(self,graph,lamb=1.0,max_iter=30):
+        super(OMNIProp,self).__init__(graph,max_iter)
+        self.lamb = lamb
+
+    def _build_propagation_matrix(self):
+        d = np.array(self.graph.sum(1).T)[0]
+        dT = np.array(self.graph.sum(0))[0]
+        Q = (sparse.diags(1.0/(d+self.lamb)).dot(self.graph)).dot(sparse.diags(1.0/(dT+self.lamb)).dot(self.graph.T))
+        Q[self.x_] = 0
+        return Q
+
+    def _build_base_matrix(self):
+        n_samples = self.graph.shape[0]
+        n_classes = self.y_.max()+1
+        unlabeled = np.setdiff1d(np.arange(n_samples),self.x_)
+
+        dU = np.array(self.graph[unlabeled].sum(1).T)[0]
+        dT = np.array(self.graph.sum(0))[0]
+        n_samples = self.graph.shape[0]
+        r = sparse.diags(1.0/(dU+self.lamb)).dot(self.lamb*self.graph[unlabeled].dot(sparse.diags(1.0/(dT+self.lamb))).dot(np.ones(n_samples))+self.lamb)
+
+        b = np.ones(n_classes) / float(n_classes)
+
+        B = np.zeros((n_samples,n_classes))
+        B[unlabeled] = np.outer(r,b)
+        B[self.x_,self.y_] = 1
+        return B
