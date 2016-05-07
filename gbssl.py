@@ -58,15 +58,18 @@ class Base():
 
         self.F_ = self._init_label_matrix()
 
-        P = self._build_propagation_matrix()
-        B = self._build_base_matrix()
+        self.P_ = self._build_propagation_matrix()
+        self.B_ = self._build_base_matrix()
 
         remaining_iter = self.max_iter
         while remaining_iter > 0:
-            self.F_ = P.dot(self.F_) + B
+            self.F_ = self._propagate()
             remaining_iter -= 1
 
         return self
+
+    def _propagate(self):
+        return self.P_.dot(self.F_) + self.B_
 
     def predict(self,x):
         """Performs prediction based on the fitted model
@@ -372,3 +375,62 @@ class OMNIProp(Base):
         B[unlabeled] = np.outer(r,b)
         B[self.x_,self.y_] = 1
         return B
+
+class CAMLP(Base):
+    """Confidence-Aware Modulated Label Propagation (CAMLP) for GBSSL
+
+    Parameters
+    ----------
+    beta : float > 0 (default = 0.1)
+      Define importance between prior and evidence from neighbors
+    H : array_like, shape = [n_classes, n_classes]
+      Define affinities between labels
+      if None, identity matrix is set
+    max_iter : float
+      maximum number of iterations allowed
+
+    Attributes
+    ----------
+    x_ : array, shape = [n_samples]
+        Input array of node IDs.
+
+    Examples
+    --------
+    <<<
+
+    References
+    ----------
+    Yamaguchi, Y., Faloutsos, C., & Kitagawa, H. (2016, May).
+    CAMLP: Confidence-Aware Modulated Label Propagation.
+    In SIAM International Conference on Data Mining.
+    """
+
+    def __init__(self,graph,beta=0.1,H=None,max_iter=30):
+        super(CAMLP,self).__init__(graph,max_iter)
+        self.beta=beta
+        self.H=H
+
+    def _arrange_params(self):
+        if self.H == None:
+            n_classes = self.y_.max()+1
+            self.H = np.identity(n_classes)
+
+    def _propagate(self):
+        return self.P_.dot(self.F_).dot(self.H) + self.B_
+
+    def _build_normalization_term(self):
+        d = np.array(self.graph.sum(1).T)[0]
+        return sparse.diags(1.0/(1.0+d*self.beta))
+
+    def _build_propagation_matrix(self):
+        Z = self._build_normalization_term()
+        return Z.dot(self.beta*self.graph)
+
+    def _build_base_matrix(self):
+        n_samples = self.graph.shape[0]
+        n_classes = self.y_.max()+1
+        B = np.ones((n_samples,n_classes))/float(n_classes)
+        B[self.x_] = 0
+        B[self.x_,self.y_] = 1
+        Z = self._build_normalization_term()
+        return Z.dot(B)
